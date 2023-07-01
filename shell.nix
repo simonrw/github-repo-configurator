@@ -4,7 +4,7 @@ with pkgs;
 let
   my-python = python311;
 
-  pythonPackages = python311.pkgs;
+  pythonPackages = my-python.pkgs;
 in
 
 mkShell {
