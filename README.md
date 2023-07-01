@@ -12,7 +12,7 @@ Configure GitHub repositories in the way I like
 
 * sets up all checks to be required before pull requests can be merged
 * configures merge commit merging strategy
-* allows github actions to create and approve pull requests
+* allows GitHub actions to create and approve pull requests
 * allow auto-merge
 * sets "Fork pull request workflows from outside collaborators" to "Require approval for first-time contributors who are new to GitHub"
 * ...
