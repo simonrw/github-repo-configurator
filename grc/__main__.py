@@ -12,7 +12,6 @@ MATRIX_PLACEHOLDER_RE = re.compile(r"\$\{\{\s*matrix\.(?P<name>\w+)\s*\}\}")
 
 
 class RemoteWorkflowFile(TypedDict):
-    name: str
     download_url: str
 
 
@@ -29,30 +28,41 @@ class WorkflowDefinition(TypedDict):
     jobs: dict[str, JobDefinition]
 
 
-if __name__ == "__main__":
-    session = requests.Session()
-    session.headers["Authorization"] = f"Bearer {os.environ['GITHUB_ACCESS_TOKEN']}"
-    session.headers["X-GitHub-Api-Version"] = "2022-11-28"
+class GitHubClient:
+    def __init__(self, token: str):
+        session = requests.Session()
+        session.headers["Authorization"] = f"Bearer {token}"
+        session.headers["X-GitHub-Api-Version"] = "2022-11-28"
+        self.session = session
 
-    owner = "simonrw"
-    repo = "rynamodb"
+    def get_workflow_metas(self, owner: str, repo: str) -> list[RemoteWorkflowFile]:
+        r = self.session.get(
+            f"https://api.github.com/repos/{owner}/{repo}/contents/.github/workflows"
+        )
+        r.raise_for_status()
+        return r.json()
 
-    # get contents of workflows
-    r = session.get(f"https://api.github.com/repos/{owner}/{repo}/contents/.github/workflows")
-    r.raise_for_status()
-    workflow_meta: list[RemoteWorkflowFile] = r.json()
-
-    names = []
-    for workflow in workflow_meta:
-        name = workflow["name"]
-        download_url = workflow["download_url"]
+    def get_workflow_file_contents(self, meta: RemoteWorkflowFile) -> dict:
+        download_url = meta["download_url"]
 
         # download the file and parse the contents
         r = requests.get(download_url)
         r.raise_for_status()
         body = r.text
-        workflow_definition: WorkflowDefinition = yaml.safe_load(body)
-        # print(json.dumps(workflow_definition, indent=2))
+        return yaml.safe_load(body)
+
+
+if __name__ == "__main__":
+    owner = "simonrw"
+    repo = "rynamodb"
+
+    token = os.environ["GITHUB_ACCESS_TOKEN"]
+    client = GitHubClient(token)
+    workflow_meta = client.get_workflow_metas(owner, repo)
+
+    names = []
+    for workflow in workflow_meta:
+        workflow_definition = client.get_workflow_file_contents(workflow)
         for job in workflow_definition["jobs"].values():
             # first parse the job strategy matrix
             matrix = job.get("strategy", {}).get("matrix", {})
