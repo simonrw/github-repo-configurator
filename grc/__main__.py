@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 import json
 import re
-from typing import TypedDict, Optional
+from typing import Any, TypedDict, Optional
 
 import requests
 import yaml
@@ -28,18 +28,45 @@ class WorkflowDefinition(TypedDict):
     jobs: dict[str, JobDefinition]
 
 
-class GitHubClient:
+class Repository(TypedDict):
+    default_branch: str
+
+
+class Check(TypedDict):
+    context: str
+
+
+class SetBranchProtectionPayload(TypedDict):
+    strict: bool
+    checks: list[Check]
+
+
+class GitHubClientFactory:
     def __init__(self, token: str):
         session = requests.Session()
         session.headers["Authorization"] = f"Bearer {token}"
         session.headers["X-GitHub-Api-Version"] = "2022-11-28"
+        session.headers["Accept"] = "application/vnd.github+json"
         self.session = session
 
-    def get_workflow_metas(self, owner: str, repo: str) -> list[RemoteWorkflowFile]:
-        r = self.session.get(
-            f"https://api.github.com/repos/{owner}/{repo}/contents/.github/workflows"
-        )
-        r.raise_for_status()
+    def repo(self, owner: str, repo: str) -> GitHubClient:
+        return GitHubClient(self.session, owner, repo)
+
+
+class GitHubClient:
+    def __init__(self, session: requests.Session, owner: str, repo: str):
+        self.session = session
+        self.owner = owner
+        self.repo = repo
+
+    def get_repository(self) -> Repository:
+        r = self.session.get(self._url(""))
+        self._check_for_errors(r)
+        return r.json()
+
+    def get_workflow_metas(self) -> list[RemoteWorkflowFile]:
+        r = self.session.get(self._url("/contents/.github/workflows"))
+        self._check_for_errors(r)
         return r.json()
 
     def get_workflow_file_contents(self, meta: RemoteWorkflowFile) -> dict:
@@ -47,9 +74,40 @@ class GitHubClient:
 
         # download the file and parse the contents
         r = requests.get(download_url)
-        r.raise_for_status()
+        self._check_for_errors(r)
         body = r.text
         return yaml.safe_load(body)
+
+    def get_branch_protection(self, branch: str) -> dict:
+        r = self.session.get(self._url(f"/branches/{branch}/protection"))
+        self._check_for_errors(r)
+        return r.json()
+
+    def get_default_branch(self) -> str:
+        return self.get_repository()["default_branch"]
+
+    def set_branch_protection(self, checks: list[str]):
+        branch_name = self.get_default_branch()
+        payload: SetBranchProtectionPayload = {
+            "strict": False,
+            "checks": [{"context": check} for check in checks],
+        }
+        r = self.session.patch(
+            self._url(f"/branches/{branch_name}/protection/required_status_checks"),
+            json=payload,
+        )
+        self._check_for_errors(r)
+
+    def _check_for_errors(self, response: requests.Response):
+        if response.status_code >= 300:
+            breakpoint()
+
+    def _url(self, stub: str) -> str:
+        return f"https://api.github.com/repos/{self.owner}/{self.repo}{stub}"
+
+
+def jprint(o: Any):
+    print(json.dumps(o, indent=2))
 
 
 if __name__ == "__main__":
@@ -57,8 +115,9 @@ if __name__ == "__main__":
     repo = "rynamodb"
 
     token = os.environ["GITHUB_ACCESS_TOKEN"]
-    client = GitHubClient(token)
-    workflow_meta = client.get_workflow_metas(owner, repo)
+    client = GitHubClientFactory(token).repo(owner, repo)
+
+    workflow_meta = client.get_workflow_metas()
 
     names = []
     for workflow in workflow_meta:
@@ -79,5 +138,4 @@ if __name__ == "__main__":
             else:
                 names.append(job_name)
 
-    for name in names:
-        print(name)
+    client.set_branch_protection(names)
